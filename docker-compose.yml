@@ -1,0 +1,61 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - backend
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mcp-server:
+    build: ./mcp-server
+    networks:
+      - mcp-isolated
+      - backend
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    cpus: 0.5
+
+  worker:
+    build: ./worker
+    env_file: .env
+    depends_on:
+      - redis
+      - mcp-server
+    networks:
+      - backend
+      - mcp-isolated
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true
+  mcp-isolated:
+    driver: bridge
+    internal: false
+
+volumes:
+  redis-data:
