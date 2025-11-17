@@ -19,6 +19,9 @@ services:
     build: ./mcp-server
     ports:
       - "127.0.0.1:8080:8080"
+    environment:
+      - NVD_API_KEY=${NVD_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
     networks:
       - mcp-isolated
       - backend
@@ -48,6 +51,26 @@ services:
     security_opt:
       - no-new-privileges:true
     mem_limit: 512m
+
+  slack-bot:
+    build: ./slack-bot
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.25
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis; redis.from_url('redis://redis:6379').ping()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 networks:
   frontend:

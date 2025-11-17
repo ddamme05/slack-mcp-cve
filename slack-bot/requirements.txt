@@ -1,0 +1,11 @@
+# Slack SDK with Socket Mode support
+# Latest version as of October 2025, includes AI features
+slack-bolt==1.27.0
+
+# Redis client
+# Latest version as of October 2025, supports Python 3.9+
+redis==7.0.1
+
+# Websocket support for Socket Mode
+# Latest version as of October 2025
+websocket-client==1.9.0

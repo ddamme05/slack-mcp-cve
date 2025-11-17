@@ -98,8 +98,4 @@ redis-data/
 postgres-data/
 
 # Project documentation (not for git)
-generate_snapshot.py
-FEEDBACK_TRACKING.md
-PHASE1_SNAPSHOT.md
-diff.txt
-mcp.json
+docs/*
