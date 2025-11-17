@@ -1,0 +1,8 @@
+# Test dependencies for Slack CVE Bot
+
+# Testing framework
+pytest==9.0.1
+pytest-cov==7.0.0
+
+# For async tests (if needed later)
+pytest-asyncio==1.3.0
