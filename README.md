@@ -1,3 +1,12 @@
+## Demo
+
+
+https://github.com/user-attachments/assets/6b7763a1-6a5e-45d1-992c-0647ba3e4471
+
+
+
+*Demo showing exact CVE queries, keyword searches, resource links and overview of CVE's*
+
 # Slack CVE Bot - MCP Implementation
 
 A production-ready Slack bot for CVE research using the Model Context Protocol (MCP), Docker, Redis, and Python.
