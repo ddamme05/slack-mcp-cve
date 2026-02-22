@@ -215,8 +215,6 @@ This CVE ID doesn't exist in the NVD database yet. Possible reasons:
             report.append(f"{type_label} ({github_data.get('total_found', 0)} total)")
             for repo in repos[:5]:
                 name = repo['name']
-                if 'trailofbits' in name.lower():
-                    name = f"*{name}* ⭐ Trail of Bits!"
                 report.append(f"• {name} ({repo['stars']} ⭐)")
                 report.append(f"  {repo['url']}")
         elif search_type != "all":

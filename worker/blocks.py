@@ -251,9 +251,6 @@ def format_cve_blocks(
             stars = repo.get("stars", 0)
             url = repo.get("url", "#")
 
-            if "trailofbits" in name.lower():
-                name = f"*{name}* ⭐ Trail of Bits!"
-
             repo_text += f"• <{url}|{name}> ({stars} ⭐)\n"
 
         blocks.append({
