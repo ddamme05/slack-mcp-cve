@@ -188,6 +188,49 @@ class TestWorkerDeliveryMethods:
         assert not has_channel, "Job should be rejected without delivery method"
 
 
+class TestWorkerDeliveryPayloads:
+    """Test delivery payload assembly logic"""
+
+    def test_text_delivery_payload(self):
+        """Text-only payloads should include text and no blocks"""
+        report = "hello"
+        blocks = None
+        use_blocks = True
+
+        payload = {"text": report}
+        if use_blocks and blocks:
+            payload["blocks"] = blocks
+
+        assert payload == {"text": "hello"}
+
+    def test_block_delivery_payload(self):
+        """Block payloads should include both text and blocks"""
+        report = "hello"
+        blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "x"}}]
+        use_blocks = True
+
+        payload = {"text": report}
+        if use_blocks and blocks:
+            payload["blocks"] = blocks
+
+        assert payload["text"] == "hello"
+        assert payload["blocks"] == blocks
+
+    def test_web_api_kwargs_include_thread_ts(self):
+        """Web API delivery should carry thread_ts when present"""
+        payload = {"text": "hello", "blocks": [{"type": "section"}]}
+        kwargs = {
+            "channel": "C12345",
+            "thread_ts": "1234567890.123456",
+            **payload,
+        }
+
+        assert kwargs["channel"] == "C12345"
+        assert kwargs["thread_ts"] == "1234567890.123456"
+        assert kwargs["text"] == "hello"
+        assert "blocks" in kwargs
+
+
 class TestWorkerSearchTypeHandling:
     """Test search_type parameter handling"""
     

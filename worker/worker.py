@@ -94,6 +94,76 @@ def get_job_origin(job_data: dict) -> str:
     """Return queue origin, with fallback for legacy jobs."""
     return job_data.get("origin", "unknown-origin")
 
+
+def build_delivery_payload(report: str, blocks: list | None) -> tuple[dict, str]:
+    """Build Slack delivery payload and report mode for logging/tracing."""
+    payload = {"text": report}
+    mode = "text"
+    if USE_BLOCKS and blocks:
+        payload["blocks"] = blocks
+        mode = "blocks"
+    return payload, mode
+
+
+def deliver_response(job_data: dict, report: str, blocks: list | None, job_prefix: str) -> dict:
+    """Send a formatted worker response back to Slack."""
+    payload, mode = build_delivery_payload(report, blocks)
+
+    if job_data.get("response_url"):
+        try:
+            response = httpx.post(
+                job_data["response_url"],
+                json=payload,
+                timeout=5.0
+            )
+            response.raise_for_status()
+            print(f"✅ {job_prefix} Job completed and sent to Slack (webhook, {mode})", flush=True)
+            return {"delivered": True, "delivery_method": "webhook", "mode": mode}
+        except Exception as webhook_error:
+            print(f"❌ {job_prefix} Failed to send to Slack webhook: {webhook_error}", flush=True)
+            return {
+                "delivered": False,
+                "delivery_method": "webhook",
+                "mode": mode,
+                "error": str(webhook_error),
+            }
+
+    if job_data.get("channel_id") and slack_client:
+        try:
+            kwargs = {
+                "channel": job_data["channel_id"],
+                "thread_ts": job_data.get("thread_ts"),
+                **payload,
+            }
+            slack_client.chat_postMessage(**kwargs)
+            print(f"✅ {job_prefix} Job completed and sent to Slack (Web API, {mode})", flush=True)
+            return {"delivered": True, "delivery_method": "web_api", "mode": mode}
+        except SlackApiError as slack_error:
+            error_message = slack_error.response["error"]
+            print(f"❌ {job_prefix} Failed to send to Slack Web API: {error_message}", flush=True)
+            return {
+                "delivered": False,
+                "delivery_method": "web_api",
+                "mode": mode,
+                "error": error_message,
+            }
+        except Exception as e:
+            print(f"❌ {job_prefix} Failed to send to Slack Web API: {e}", flush=True)
+            return {
+                "delivered": False,
+                "delivery_method": "web_api",
+                "mode": mode,
+                "error": str(e),
+            }
+
+    print(f"⚠️ {job_prefix} Job missing delivery method (no response_url or channel_id)", flush=True)
+    return {
+        "delivered": False,
+        "delivery_method": "missing",
+        "mode": mode,
+        "error": "missing_delivery_method",
+    }
+
 def format_cve_report(nvd_data: dict, github_data: dict, search_type: str = "all") -> str:
     """Format single CVE details for Slack, optionally filtered by search_type"""
 
@@ -362,45 +432,7 @@ def main():
                     if USE_BLOCKS and blocks:
                         print(f"📦 {job_prefix} Block count: {len(blocks)} blocks\n", flush=True)
                 else:
-                    if job_data.get("response_url"):
-                        try:
-                            payload = {"text": report}
-                            if USE_BLOCKS and blocks:
-                                payload["blocks"] = blocks
-
-                            response = httpx.post(
-                                job_data["response_url"],
-                                json=payload,
-                                timeout=5.0
-                            )
-                            response.raise_for_status()
-
-                            mode = "blocks" if (USE_BLOCKS and blocks) else "text"
-                            print(f"✅ {job_prefix} Job completed and sent to Slack (webhook, {mode})", flush=True)
-                        except Exception as webhook_error:
-                            print(f"❌ {job_prefix} Failed to send to Slack webhook: {webhook_error}", flush=True)
-
-                    elif job_data.get("channel_id") and slack_client:
-                        try:
-                            kwargs = {
-                                "channel": job_data["channel_id"],
-                                "text": report,
-                                "thread_ts": job_data.get("thread_ts")
-                            }
-                            if USE_BLOCKS and blocks:
-                                kwargs["blocks"] = blocks
-
-                            slack_client.chat_postMessage(**kwargs)
-
-                            mode = "blocks" if (USE_BLOCKS and blocks) else "text"
-                            print(f"✅ {job_prefix} Job completed and sent to Slack (Web API, {mode})", flush=True)
-                        except SlackApiError as slack_error:
-                            print(f"❌ {job_prefix} Failed to send to Slack Web API: {slack_error.response['error']}", flush=True)
-                        except Exception as e:
-                            print(f"❌ {job_prefix} Failed to send to Slack Web API: {e}", flush=True)
-
-                    else:
-                        print(f"⚠️ {job_prefix} Job missing delivery method (no response_url or channel_id)", flush=True)
+                    deliver_response(job_data, report, blocks, job_prefix)
 
         except Exception as e:
             print(f"❌ Worker error: {e}", flush=True)
