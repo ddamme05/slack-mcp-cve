@@ -263,6 +263,7 @@ def job_payload_slash_command():
     """Sample job payload from slash command"""
     import time
     return {
+        "job_id": "0123456789abcdef0123456789abcdef",
         "query": "CVE-2021-44228",
         "search_type": "all",
         "user_id": "U12345",
@@ -276,6 +277,7 @@ def job_payload_mention():
     """Sample job payload from @mention"""
     import time
     return {
+        "job_id": "fedcba9876543210fedcba9876543210",
         "query": "CVE-2021-44228",
         "search_type": "poc",
         "user_id": "U12345",

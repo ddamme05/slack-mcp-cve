@@ -6,6 +6,7 @@ Tests bot.py command parsing logic without requiring actual Slack connection
 import sys
 import os
 import time
+import uuid
 from collections import defaultdict, deque
 
 import pytest
@@ -274,6 +275,7 @@ class TestJobPayloadConstruction:
         response_url = "https://hooks.slack.com/..."
         
         job_data = {
+            "job_id": uuid.uuid4().hex,
             "query": query,
             "search_type": search_type,
             "user_id": user_id,
@@ -285,6 +287,7 @@ class TestJobPayloadConstruction:
         assert job_data["search_type"] == search_type
         assert job_data["user_id"] == user_id
         assert "response_url" in job_data
+        assert len(job_data["job_id"]) == 32
         assert "timestamp" in job_data
     
     def test_mention_job_payload(self):
@@ -296,6 +299,7 @@ class TestJobPayloadConstruction:
         thread_ts = "1234567890.123456"
         
         job_data = {
+            "job_id": uuid.uuid4().hex,
             "query": query,
             "user_id": user_id,
             "channel_id": channel_id,
@@ -307,6 +311,7 @@ class TestJobPayloadConstruction:
         assert job_data["query"] == query
         assert job_data["channel_id"] == channel_id
         assert job_data["thread_ts"] == thread_ts
+        assert len(job_data["job_id"]) == 32
         assert "response_url" not in job_data
 
 
@@ -442,6 +447,7 @@ class TestProductionScenarios:
         search_type = "all"
         
         job_data = {
+            "job_id": uuid.uuid4().hex,
             "query": query,
             "search_type": search_type,
             "timestamp": time.time()
@@ -468,6 +474,7 @@ class TestProductionScenarios:
                         search_type = type_value
         
         job_data = {
+            "job_id": uuid.uuid4().hex,
             "query": query,
             "search_type": search_type,
             "timestamp": time.time()
@@ -483,6 +490,7 @@ class TestProductionScenarios:
         query = text.strip()
         
         job_data = {
+            "job_id": uuid.uuid4().hex,
             "query": query,
             "search_type": "all",
             "timestamp": time.time()
@@ -499,6 +507,7 @@ class TestProductionScenarios:
         query = text.split(">", 1)[-1].strip()
         
         job_data = {
+            "job_id": uuid.uuid4().hex,
             "query": query,
             "channel_id": channel_id,
             "thread_ts": thread_ts,

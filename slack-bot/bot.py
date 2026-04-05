@@ -8,6 +8,7 @@ import json
 import logging
 import time
 import re
+import uuid
 from collections import defaultdict, deque
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -31,6 +32,19 @@ redis_url = os.environ.get("REDIS_URL", "redis://redis:6379")
 redis_client = redis.from_url(redis_url, decode_responses=True)
 
 user_requests = defaultdict(lambda: deque(maxlen=10))
+
+
+def build_job_data(query: str, user_id: str, search_type: str = "all", **extra_fields) -> dict:
+    """Build a queue payload with a neutral cross-service correlation ID."""
+    job_data = {
+        "job_id": uuid.uuid4().hex,
+        "query": query,
+        "search_type": search_type,
+        "user_id": user_id,
+        "timestamp": time.time(),
+    }
+    job_data.update(extra_fields)
+    return job_data
 
 @app.command("/cve-search")
 def handle_cve_search(ack, command, respond):
@@ -105,17 +119,16 @@ def handle_cve_search(ack, command, respond):
         "response_type": "ephemeral"
     })
 
-    job_data = {
-        "query": query,
-        "search_type": search_type,
-        "user_id": user_id,
-        "response_url": response_url,
-        "timestamp": time.time()
-    }
+    job_data = build_job_data(
+        query=query,
+        search_type=search_type,
+        user_id=user_id,
+        response_url=response_url,
+    )
 
     try:
         redis_client.lpush("mcp_jobs", json.dumps(job_data))
-        logger.info(f"Job queued for user {user_id}: {query}")
+        logger.info(f"Queued job {job_data['job_id']} for user {user_id}: {query}")
 
     except Exception as e:
         logger.error(f"Failed to queue job: {e}")
@@ -200,17 +213,17 @@ def handle_mention(event, say, respond):
     else:
         query_text = query
 
-    job_data = {
-        "query": query_text,
-        "user_id": user,
-        "channel_id": event.get("channel"),
-        "thread_ts": event.get("ts"),
-        "search_type": search_type,
-        "timestamp": time.time()
-    }
+    job_data = build_job_data(
+        query=query_text,
+        search_type=search_type,
+        user_id=user,
+        channel_id=event.get("channel"),
+        thread_ts=event.get("ts"),
+    )
 
     try:
         redis_client.lpush("mcp_jobs", json.dumps(job_data))
+        logger.info(f"Queued job {job_data['job_id']} for user {user}: {query_text}")
     except Exception as e:
         say(
             text=f"❌ Error queuing your request: {str(e)}",
@@ -244,17 +257,16 @@ def handle_details_button(ack, body, respond):
         })
         return
     
-    job_data = {
-        "query": cve_id,
-        "search_type": "all",
-        "user_id": user_id,
-        "response_url": response_url,
-        "timestamp": time.time()
-    }
+    job_data = build_job_data(
+        query=cve_id,
+        search_type="all",
+        user_id=user_id,
+        response_url=response_url,
+    )
     
     try:
         redis_client.lpush("mcp_jobs", json.dumps(job_data))
-        logger.info(f"Details request queued for user {user_id}: {cve_id}")
+        logger.info(f"Queued job {job_data['job_id']} for user {user_id}: {cve_id}")
     except Exception as e:
         logger.error(f"Failed to queue details request: {e}")
         respond({

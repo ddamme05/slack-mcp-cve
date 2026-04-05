@@ -84,6 +84,11 @@ def call_mcp_tool(tool_name: str, arguments: dict) -> dict:
     """Synchronous wrapper for async MCP tool call"""
     return asyncio.run(call_mcp_tool_async(tool_name, arguments))
 
+
+def get_job_id(job_data: dict) -> str:
+    """Return queue correlation ID, with fallback for legacy jobs."""
+    return job_data.get("job_id", "legacy-no-job-id")
+
 def format_cve_report(nvd_data: dict, github_data: dict, search_type: str = "all") -> str:
     """Format single CVE details for Slack, optionally filtered by search_type"""
 
@@ -295,15 +300,17 @@ def main():
                     print(f"❌ Malformed JSON in job: {e}", flush=True)
                     continue
 
+                job_id = get_job_id(job_data)
+                job_prefix = f"[job:{job_id}]"
                 query = job_data.get("query", "").strip()
                 if not query:
-                    print(f"❌ Job missing or empty 'query' field: {job_data}", flush=True)
+                    print(f"❌ {job_prefix} Job missing or empty 'query' field: {job_data}", flush=True)
                     continue
 
                 job_timestamp = job_data.get("timestamp", time.time())
                 job_age = time.time() - job_timestamp
                 if job_age > 3600:
-                    print(f"⚠️ Skipping stale job (age: {job_age:.0f}s)", flush=True)
+                    print(f"⚠️ {job_prefix} Skipping stale job (age: {job_age:.0f}s)", flush=True)
                     continue
 
                 test_mode = os.environ.get("TEST_MODE", "true").lower() == "true"
@@ -312,25 +319,25 @@ def main():
                     has_channel = bool(job_data.get("channel_id"))
 
                     if not has_webhook and not has_channel:
-                        print(f"❌ Job missing delivery method (no response_url or channel_id)", flush=True)
+                        print(f"❌ {job_prefix} Job missing delivery method (no response_url or channel_id)", flush=True)
                         continue
 
                     if has_channel and not slack_client:
-                        print(f"❌ Job requires Slack Web API but SLACK_BOT_TOKEN not set", flush=True)
+                        print(f"❌ {job_prefix} Job requires Slack Web API but SLACK_BOT_TOKEN not set", flush=True)
                         continue
 
-                print(f"📥 Processing job: {query}", flush=True)
+                print(f"📥 {job_prefix} Processing job: {query}", flush=True)
 
                 search_type = job_data.get("search_type", "all")
 
                 if re.match(r'^CVE-\d{4}-\d{4,}$', query.upper()):
-                    print(f"  → Detected CVE ID query (type: {search_type})", flush=True)
+                    print(f"  → {job_prefix} Detected CVE ID query (type: {search_type})", flush=True)
                     nvd_data = call_mcp_tool("lookup_cve_details", {"cve_id": query})
                     github_data = call_mcp_tool("search_github_cve_repos", {
                         "cve_id": query,
                         "search_type": search_type
                     })
-                    print(f"  → GitHub data received: {json.dumps(github_data, indent=2)}", flush=True)
+                    print(f"  → {job_prefix} GitHub data received: {json.dumps(github_data, indent=2)}", flush=True)
 
                     kev_data = None
                     if nvd_data.get("is_kev") and not nvd_data.get("error"):
@@ -339,15 +346,15 @@ def main():
                     report = format_cve_report(nvd_data, github_data, search_type)
                     blocks = format_cve_blocks(nvd_data, github_data, kev_data, search_type) if USE_BLOCKS else None
                 else:
-                    print(f"  → Detected keyword query", flush=True)
+                    print(f"  → {job_prefix} Detected keyword query", flush=True)
                     cve_data = call_mcp_tool("search_cve_by_keyword", {"keyword": query})
                     report = format_cve_list(cve_data)
                     blocks = format_cve_list_blocks(cve_data) if USE_BLOCKS else None
 
                 if test_mode:
-                    print(f"✅ Job completed. Report:\n{report}\n", flush=True)
+                    print(f"✅ {job_prefix} Job completed. Report:\n{report}\n", flush=True)
                     if USE_BLOCKS and blocks:
-                        print(f"📦 Block count: {len(blocks)} blocks\n", flush=True)
+                        print(f"📦 {job_prefix} Block count: {len(blocks)} blocks\n", flush=True)
                 else:
                     if job_data.get("response_url"):
                         try:
@@ -363,9 +370,9 @@ def main():
                             response.raise_for_status()
 
                             mode = "blocks" if (USE_BLOCKS and blocks) else "text"
-                            print(f"✅ Job completed and sent to Slack (webhook, {mode})", flush=True)
+                            print(f"✅ {job_prefix} Job completed and sent to Slack (webhook, {mode})", flush=True)
                         except Exception as webhook_error:
-                            print(f"❌ Failed to send to Slack webhook: {webhook_error}", flush=True)
+                            print(f"❌ {job_prefix} Failed to send to Slack webhook: {webhook_error}", flush=True)
 
                     elif job_data.get("channel_id") and slack_client:
                         try:
@@ -380,14 +387,14 @@ def main():
                             slack_client.chat_postMessage(**kwargs)
 
                             mode = "blocks" if (USE_BLOCKS and blocks) else "text"
-                            print(f"✅ Job completed and sent to Slack (Web API, {mode})", flush=True)
+                            print(f"✅ {job_prefix} Job completed and sent to Slack (Web API, {mode})", flush=True)
                         except SlackApiError as slack_error:
-                            print(f"❌ Failed to send to Slack Web API: {slack_error.response['error']}", flush=True)
+                            print(f"❌ {job_prefix} Failed to send to Slack Web API: {slack_error.response['error']}", flush=True)
                         except Exception as e:
-                            print(f"❌ Failed to send to Slack Web API: {e}", flush=True)
+                            print(f"❌ {job_prefix} Failed to send to Slack Web API: {e}", flush=True)
 
                     else:
-                        print(f"⚠️ Job missing delivery method (no response_url or channel_id)", flush=True)
+                        print(f"⚠️ {job_prefix} Job missing delivery method (no response_url or channel_id)", flush=True)
 
         except Exception as e:
             print(f"❌ Worker error: {e}", flush=True)
