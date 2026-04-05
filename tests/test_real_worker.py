@@ -231,6 +231,81 @@ class TestWorkerDeliveryPayloads:
         assert "blocks" in kwargs
 
 
+class TestWorkerTraceScaffold:
+    """Test trace scaffold data shapes"""
+
+    def test_lookup_trace_summary_shape(self):
+        """Lookup summary should keep the fields we care about"""
+        result = {
+            "cve_id": "CVE-2021-44228",
+            "severity": "CRITICAL",
+            "cvss_score": 10.0,
+            "is_kev": True,
+            "references": [{"url": "a"}, {"url": "b"}],
+        }
+
+        summary = {
+            "tool_name": "lookup_cve_details",
+            "error": result.get("error"),
+            "cve_id": result.get("cve_id"),
+            "severity": result.get("severity"),
+            "cvss_score": result.get("cvss_score"),
+            "is_kev": result.get("is_kev"),
+            "reference_count": len(result.get("references", [])),
+        }
+        summary = {key: value for key, value in summary.items() if value is not None}
+
+        assert summary["tool_name"] == "lookup_cve_details"
+        assert summary["cve_id"] == "CVE-2021-44228"
+        assert summary["reference_count"] == 2
+
+    def test_github_trace_summary_shape(self):
+        """GitHub summary should expose total_found and repo_count"""
+        result = {
+            "cve_id": "CVE-2021-44228",
+            "search_type": "poc",
+            "total_found": 10,
+            "repositories": [{"name": "a"}, {"name": "b"}, {"name": "c"}],
+        }
+
+        summary = {
+            "tool_name": "search_github_cve_repos",
+            "error": result.get("error"),
+            "cve_id": result.get("cve_id"),
+            "total_found": result.get("total_found", 0),
+            "repo_count": len(result.get("repositories", [])),
+            "search_type": result.get("search_type"),
+        }
+        summary = {key: value for key, value in summary.items() if value is not None}
+
+        assert summary["tool_name"] == "search_github_cve_repos"
+        assert summary["total_found"] == 10
+        assert summary["repo_count"] == 3
+
+    def test_trace_event_base_shape(self):
+        """Trace events should carry shared queue context"""
+        job_data = {
+            "job_id": "0123456789abcdef0123456789abcdef",
+            "origin": "slash_command",
+            "query": "CVE-2021-44228",
+            "search_type": "all",
+        }
+
+        event = {
+            "event": "worker_trace",
+            "event_type": "job_started",
+            "job_id": job_data.get("job_id", "legacy-no-job-id"),
+            "origin": job_data.get("origin", "unknown-origin"),
+            "query": job_data.get("query"),
+            "search_type": job_data.get("search_type", "all"),
+        }
+
+        assert event["event"] == "worker_trace"
+        assert event["event_type"] == "job_started"
+        assert event["job_id"] == "0123456789abcdef0123456789abcdef"
+        assert event["origin"] == "slash_command"
+
+
 class TestWorkerSearchTypeHandling:
     """Test search_type parameter handling"""
     

@@ -14,6 +14,7 @@ from blocks import format_cve_blocks, format_cve_list_blocks, format_error_block
 load_dotenv()
 
 USE_BLOCKS = os.environ.get("USE_BLOCKS", "true").lower() == "true"
+TRACE_LOGS_ENABLED = os.environ.get("TRACE_LOGS_ENABLED", "false").lower() == "true"
 slack_client = None
 if os.environ.get("SLACK_BOT_TOKEN"):
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
@@ -163,6 +164,63 @@ def deliver_response(job_data: dict, report: str, blocks: list | None, job_prefi
         "mode": mode,
         "error": "missing_delivery_method",
     }
+
+
+def summarize_tool_result(tool_name: str, result: dict) -> dict:
+    """Summarize tool output into trace-friendly metadata."""
+    summary = {
+        "tool_name": tool_name,
+        "error": result.get("error"),
+    }
+
+    if tool_name == "lookup_cve_details":
+        summary.update({
+            "cve_id": result.get("cve_id"),
+            "severity": result.get("severity"),
+            "cvss_score": result.get("cvss_score"),
+            "is_kev": result.get("is_kev"),
+            "reference_count": len(result.get("references", [])),
+        })
+    elif tool_name == "search_github_cve_repos":
+        summary.update({
+            "cve_id": result.get("cve_id"),
+            "total_found": result.get("total_found", 0),
+            "repo_count": len(result.get("repositories", [])),
+            "search_type": result.get("search_type"),
+        })
+    elif tool_name == "check_cisa_kev_details":
+        summary.update({
+            "cve_id": result.get("cve_id"),
+            "is_kev": result.get("is_kev"),
+            "date_added": result.get("date_added"),
+            "known_ransomware_use": result.get("known_ransomware_use"),
+        })
+    elif tool_name == "search_cve_by_keyword":
+        summary.update({
+            "keyword": result.get("keyword"),
+            "total_results": result.get("total_results", 0),
+            "result_count": len(result.get("cves", [])),
+        })
+
+    return {key: value for key, value in summary.items() if value is not None}
+
+
+def emit_trace_event(job_data: dict, event_type: str, **fields) -> None:
+    """Emit structured trace-like logs for later platform integration."""
+    if not TRACE_LOGS_ENABLED:
+        return
+
+    event = {
+        "event": "worker_trace",
+        "event_type": event_type,
+        "job_id": get_job_id(job_data),
+        "origin": get_job_origin(job_data),
+        "query": job_data.get("query"),
+        "search_type": job_data.get("search_type", "all"),
+        "timestamp": round(time.time(), 3),
+    }
+    event.update(fields)
+    print(f"🔎 TRACE {json.dumps(event, sort_keys=True)}", flush=True)
 
 def format_cve_report(nvd_data: dict, github_data: dict, search_type: str = "all") -> str:
     """Format single CVE details for Slack, optionally filtered by search_type"""
@@ -405,34 +463,71 @@ def main():
                 print(f"📥 {job_prefix} Processing job: {query}", flush=True)
 
                 search_type = job_data.get("search_type", "all")
+                emit_trace_event(job_data, "job_started")
 
                 if re.match(r'^CVE-\d{4}-\d{4,}$', query.upper()):
                     print(f"  → {job_prefix} Detected CVE ID query (type: {search_type})", flush=True)
                     nvd_data = call_mcp_tool("lookup_cve_details", {"cve_id": query})
+                    emit_trace_event(
+                        job_data,
+                        "tool_completed",
+                        **summarize_tool_result("lookup_cve_details", nvd_data)
+                    )
                     github_data = call_mcp_tool("search_github_cve_repos", {
                         "cve_id": query,
                         "search_type": search_type
                     })
+                    emit_trace_event(
+                        job_data,
+                        "tool_completed",
+                        **summarize_tool_result("search_github_cve_repos", github_data)
+                    )
                     print(f"  → {job_prefix} GitHub data received: {json.dumps(github_data, indent=2)}", flush=True)
 
                     kev_data = None
                     if nvd_data.get("is_kev") and not nvd_data.get("error"):
                         kev_data = call_mcp_tool("check_cisa_kev_details", {"cve_id": query})
+                        emit_trace_event(
+                            job_data,
+                            "tool_completed",
+                            **summarize_tool_result("check_cisa_kev_details", kev_data)
+                        )
 
                     report = format_cve_report(nvd_data, github_data, search_type)
                     blocks = format_cve_blocks(nvd_data, github_data, kev_data, search_type) if USE_BLOCKS else None
                 else:
                     print(f"  → {job_prefix} Detected keyword query", flush=True)
                     cve_data = call_mcp_tool("search_cve_by_keyword", {"keyword": query})
+                    emit_trace_event(
+                        job_data,
+                        "tool_completed",
+                        **summarize_tool_result("search_cve_by_keyword", cve_data)
+                    )
                     report = format_cve_list(cve_data)
                     blocks = format_cve_list_blocks(cve_data) if USE_BLOCKS else None
+
+                emit_trace_event(
+                    job_data,
+                    "report_built",
+                    has_blocks=bool(blocks),
+                    report_length=len(report),
+                    test_mode=test_mode,
+                )
 
                 if test_mode:
                     print(f"✅ {job_prefix} Job completed. Report:\n{report}\n", flush=True)
                     if USE_BLOCKS and blocks:
                         print(f"📦 {job_prefix} Block count: {len(blocks)} blocks\n", flush=True)
+                    emit_trace_event(
+                        job_data,
+                        "job_completed",
+                        delivered=False,
+                        delivery_method="test_mode",
+                        has_blocks=bool(blocks),
+                    )
                 else:
-                    deliver_response(job_data, report, blocks, job_prefix)
+                    delivery_result = deliver_response(job_data, report, blocks, job_prefix)
+                    emit_trace_event(job_data, "job_completed", **delivery_result)
 
         except Exception as e:
             print(f"❌ Worker error: {e}", flush=True)
