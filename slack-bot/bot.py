@@ -34,12 +34,19 @@ redis_client = redis.from_url(redis_url, decode_responses=True)
 user_requests = defaultdict(lambda: deque(maxlen=10))
 
 
-def build_job_data(query: str, user_id: str, search_type: str = "all", **extra_fields) -> dict:
+def build_job_data(
+    query: str,
+    user_id: str,
+    search_type: str = "all",
+    origin: str = "unknown",
+    **extra_fields
+) -> dict:
     """Build a queue payload with a neutral cross-service correlation ID."""
     job_data = {
         "job_id": uuid.uuid4().hex,
         "query": query,
         "search_type": search_type,
+        "origin": origin,
         "user_id": user_id,
         "timestamp": time.time(),
     }
@@ -123,6 +130,7 @@ def handle_cve_search(ack, command, respond):
         query=query,
         search_type=search_type,
         user_id=user_id,
+        origin="slash_command",
         response_url=response_url,
     )
 
@@ -217,6 +225,7 @@ def handle_mention(event, say, respond):
         query=query_text,
         search_type=search_type,
         user_id=user,
+        origin="mention",
         channel_id=event.get("channel"),
         thread_ts=event.get("ts"),
     )
@@ -261,6 +270,7 @@ def handle_details_button(ack, body, respond):
         query=cve_id,
         search_type="all",
         user_id=user_id,
+        origin="details_button",
         response_url=response_url,
     )
     

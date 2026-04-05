@@ -278,6 +278,7 @@ class TestJobPayloadConstruction:
             "job_id": uuid.uuid4().hex,
             "query": query,
             "search_type": search_type,
+            "origin": "slash_command",
             "user_id": user_id,
             "response_url": response_url,
             "timestamp": time.time()
@@ -285,6 +286,7 @@ class TestJobPayloadConstruction:
         
         assert job_data["query"] == query
         assert job_data["search_type"] == search_type
+        assert job_data["origin"] == "slash_command"
         assert job_data["user_id"] == user_id
         assert "response_url" in job_data
         assert len(job_data["job_id"]) == 32
@@ -305,12 +307,14 @@ class TestJobPayloadConstruction:
             "channel_id": channel_id,
             "thread_ts": thread_ts,
             "search_type": search_type,
+            "origin": "mention",
             "timestamp": time.time()
         }
         
         assert job_data["query"] == query
         assert job_data["channel_id"] == channel_id
         assert job_data["thread_ts"] == thread_ts
+        assert job_data["origin"] == "mention"
         assert len(job_data["job_id"]) == 32
         assert "response_url" not in job_data
 
@@ -450,6 +454,7 @@ class TestProductionScenarios:
             "job_id": uuid.uuid4().hex,
             "query": query,
             "search_type": search_type,
+            "origin": "slash_command",
             "timestamp": time.time()
         }
         
@@ -477,6 +482,7 @@ class TestProductionScenarios:
             "job_id": uuid.uuid4().hex,
             "query": query,
             "search_type": search_type,
+            "origin": "slash_command",
             "timestamp": time.time()
         }
         
@@ -493,6 +499,7 @@ class TestProductionScenarios:
             "job_id": uuid.uuid4().hex,
             "query": query,
             "search_type": "all",
+            "origin": "slash_command",
             "timestamp": time.time()
         }
         
@@ -512,6 +519,7 @@ class TestProductionScenarios:
             "channel_id": channel_id,
             "thread_ts": thread_ts,
             "search_type": "all",
+            "origin": "mention",
             "timestamp": time.time()
         }
         

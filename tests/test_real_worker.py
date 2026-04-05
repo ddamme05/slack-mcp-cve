@@ -133,12 +133,21 @@ class TestWorkerErrorHandling:
 
 class TestWorkerDeliveryMethods:
     """Test worker delivery methods (webhook vs Web API)"""
+
+    def test_origin_metadata_defaults(self):
+        """Test origin metadata patterns for queued jobs"""
+        legacy_job = {"query": "CVE-2021-44228"}
+        traced_job = {"query": "CVE-2021-44228", "origin": "slash_command"}
+
+        assert legacy_job.get("origin", "unknown-origin") == "unknown-origin"
+        assert traced_job.get("origin", "unknown-origin") == "slash_command"
     
     def test_webhook_delivery_detection(self):
         """Test detection of webhook delivery (slash command)"""
         job_data = {
             "query": "CVE-2021-44228",
             "response_url": "https://hooks.slack.com/...",
+            "origin": "slash_command",
             "timestamp": 0
         }
         
@@ -154,6 +163,7 @@ class TestWorkerDeliveryMethods:
             "query": "CVE-2021-44228",
             "channel_id": "C12345",
             "thread_ts": "1234567890.123456",
+            "origin": "mention",
             "timestamp": 0
         }
         

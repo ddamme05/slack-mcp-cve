@@ -266,6 +266,7 @@ def job_payload_slash_command():
         "job_id": "0123456789abcdef0123456789abcdef",
         "query": "CVE-2021-44228",
         "search_type": "all",
+        "origin": "slash_command",
         "user_id": "U12345",
         "response_url": "https://hooks.slack.com/commands/...",
         "timestamp": time.time()
@@ -280,6 +281,7 @@ def job_payload_mention():
         "job_id": "fedcba9876543210fedcba9876543210",
         "query": "CVE-2021-44228",
         "search_type": "poc",
+        "origin": "mention",
         "user_id": "U12345",
         "channel_id": "C12345",
         "thread_ts": "1234567890.123456",

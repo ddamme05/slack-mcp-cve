@@ -89,6 +89,11 @@ def get_job_id(job_data: dict) -> str:
     """Return queue correlation ID, with fallback for legacy jobs."""
     return job_data.get("job_id", "legacy-no-job-id")
 
+
+def get_job_origin(job_data: dict) -> str:
+    """Return queue origin, with fallback for legacy jobs."""
+    return job_data.get("origin", "unknown-origin")
+
 def format_cve_report(nvd_data: dict, github_data: dict, search_type: str = "all") -> str:
     """Format single CVE details for Slack, optionally filtered by search_type"""
 
@@ -301,7 +306,8 @@ def main():
                     continue
 
                 job_id = get_job_id(job_data)
-                job_prefix = f"[job:{job_id}]"
+                job_origin = get_job_origin(job_data)
+                job_prefix = f"[job:{job_id}][origin:{job_origin}]"
                 query = job_data.get("query", "").strip()
                 if not query:
                     print(f"❌ {job_prefix} Job missing or empty 'query' field: {job_data}", flush=True)
