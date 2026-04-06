@@ -21,7 +21,9 @@ load_dotenv()
 
 USE_BLOCKS = os.environ.get("USE_BLOCKS", "true").lower() == "true"
 TRACE_LOGS_ENABLED = os.environ.get("TRACE_LOGS_ENABLED", "false").lower() == "true"
+TRACE_INCLUDE_QUERY = os.environ.get("TRACE_INCLUDE_QUERY", "false").lower() == "true"
 LANGFUSE_ENABLED = os.environ.get("LANGFUSE_ENABLED", "false").lower() == "true"
+TEST_MODE_VERBOSE = os.environ.get("TEST_MODE_VERBOSE", "false").lower() == "true"
 slack_client = None
 if os.environ.get("SLACK_BOT_TOKEN"):
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
@@ -134,6 +136,14 @@ def get_job_id(job_data: dict) -> str:
 def get_job_origin(job_data: dict) -> str:
     """Return queue origin, with fallback for legacy jobs."""
     return job_data.get("origin", "unknown-origin")
+
+
+def get_langfuse_metadata(job_data: dict) -> dict:
+    """Return non-sensitive metadata for Langfuse observations."""
+    return {
+        "job_id": get_job_id(job_data),
+        "origin": get_job_origin(job_data),
+    }
 
 
 def build_delivery_payload(report: str, blocks: list | None) -> tuple[dict, str]:
@@ -255,10 +265,11 @@ def emit_trace_event(job_data: dict, event_type: str, **fields) -> None:
         "event_type": event_type,
         "job_id": get_job_id(job_data),
         "origin": get_job_origin(job_data),
-        "query": job_data.get("query"),
         "search_type": job_data.get("search_type", "all"),
         "timestamp": round(time.time(), 3),
     }
+    if TRACE_INCLUDE_QUERY:
+        event["query"] = job_data.get("query")
     event.update(fields)
     print(f"🔎 TRACE {json.dumps(event, sort_keys=True)}", flush=True)
 
@@ -276,11 +287,7 @@ def start_job_observation(job_data: dict):
             "query": job_data.get("query"),
             "search_type": job_data.get("search_type", "all"),
         },
-        metadata={
-            "job_id": get_job_id(job_data),
-            "origin": get_job_origin(job_data),
-            "user_id": job_data.get("user_id"),
-        },
+        metadata=get_langfuse_metadata(job_data),
     )
 
 
@@ -290,10 +297,7 @@ def call_mcp_tool_with_observation(job_data: dict, parent_observation, tool_name
         name=tool_name,
         as_type="tool",
         input=arguments,
-        metadata={
-            "job_id": get_job_id(job_data),
-            "origin": get_job_origin(job_data),
-        },
+        metadata=get_langfuse_metadata(job_data),
     ) as tool_observation:
         result = call_mcp_tool(tool_name, arguments)
         tool_observation.update(output=summarize_tool_result(tool_name, result))
@@ -566,7 +570,12 @@ def main():
                                 "search_type": search_type
                             },
                         )
-                        print(f"  → {job_prefix} GitHub data received: {json.dumps(github_data, indent=2)}", flush=True)
+                        print(
+                            f"  → {job_prefix} GitHub data received "
+                            f"(total_found={github_data.get('total_found', 0)}, "
+                            f"repo_count={len(github_data.get('repositories', []))})",
+                            flush=True,
+                        )
 
                         kev_data = None
                         if nvd_data.get("is_kev") and not nvd_data.get("error"):
@@ -599,7 +608,13 @@ def main():
                     )
 
                     if test_mode:
-                        print(f"✅ {job_prefix} Job completed. Report:\n{report}\n", flush=True)
+                        print(
+                            f"✅ {job_prefix} Job completed in test mode "
+                            f"(report_length={len(report)}, has_blocks={bool(blocks)})",
+                            flush=True,
+                        )
+                        if TEST_MODE_VERBOSE:
+                            print(f"📝 {job_prefix} Test mode report:\n{report}\n", flush=True)
                         if USE_BLOCKS and blocks:
                             print(f"📦 {job_prefix} Block count: {len(blocks)} blocks\n", flush=True)
                         delivery_result = {
@@ -615,10 +630,7 @@ def main():
                                 "has_response_url": bool(job_data.get("response_url")),
                                 "has_channel_id": bool(job_data.get("channel_id")),
                             },
-                            metadata={
-                                "job_id": get_job_id(job_data),
-                                "origin": get_job_origin(job_data),
-                            },
+                            metadata=get_langfuse_metadata(job_data),
                         ) as delivery_observation:
                             delivery_result = deliver_response(job_data, report, blocks, job_prefix)
                             delivery_observation.update(output=delivery_result)

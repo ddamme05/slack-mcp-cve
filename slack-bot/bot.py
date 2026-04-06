@@ -53,6 +53,16 @@ def build_job_data(
     job_data.update(extra_fields)
     return job_data
 
+
+def log_job_queued(job_data: dict) -> None:
+    """Log queueing without exposing raw user identifiers or query text."""
+    logger.info(
+        "Queued job %s (origin=%s, search_type=%s)",
+        job_data["job_id"],
+        job_data.get("origin", "unknown"),
+        job_data.get("search_type", "all"),
+    )
+
 @app.command("/cve-search")
 def handle_cve_search(ack, command, respond):
     """
@@ -74,7 +84,7 @@ def handle_cve_search(ack, command, respond):
                    "Please wait a moment before searching again.",
             "response_type": "ephemeral"
         })
-        logger.warning(f"Rate limit exceeded for user {user_id}")
+        logger.warning("Rate limit exceeded for slash command request")
         return
 
     text = command.get("text", "").strip()
@@ -136,7 +146,7 @@ def handle_cve_search(ack, command, respond):
 
     try:
         redis_client.lpush("mcp_jobs", json.dumps(job_data))
-        logger.info(f"Queued job {job_data['job_id']} for user {user_id}: {query}")
+        log_job_queued(job_data)
 
     except Exception as e:
         logger.error(f"Failed to queue job: {e}")
@@ -169,7 +179,7 @@ def handle_mention(event, say, respond):
                  "Please wait a moment before searching again.",
             thread_ts=event.get("ts")
         )
-        logger.warning(f"Rate limit exceeded for user {user}")
+        logger.warning("Rate limit exceeded for mention request")
         return
 
     query = text.split(">", 1)[-1].strip()
@@ -232,7 +242,7 @@ def handle_mention(event, say, respond):
 
     try:
         redis_client.lpush("mcp_jobs", json.dumps(job_data))
-        logger.info(f"Queued job {job_data['job_id']} for user {user}: {query_text}")
+        log_job_queued(job_data)
     except Exception as e:
         say(
             text=f"❌ Error queuing your request: {str(e)}",
@@ -242,7 +252,7 @@ def handle_mention(event, say, respond):
 @app.event("message")
 def handle_message_events(body, logger):
     """Catch-all for message events"""
-    logger.debug(f"Message event: {body}")
+    logger.debug("Message event received")
 
 @app.action(re.compile(r"^view_details_.*"))
 def handle_details_button(ack, body, respond):
@@ -264,6 +274,7 @@ def handle_details_button(ack, body, respond):
             "response_type": "ephemeral",
             "text": "⚠️ Rate limit exceeded. You can make up to 5 requests per minute."
         })
+        logger.warning("Rate limit exceeded for details button request")
         return
     
     job_data = build_job_data(
@@ -276,7 +287,7 @@ def handle_details_button(ack, body, respond):
     
     try:
         redis_client.lpush("mcp_jobs", json.dumps(job_data))
-        logger.info(f"Queued job {job_data['job_id']} for user {user_id}: {cve_id}")
+        log_job_queued(job_data)
     except Exception as e:
         logger.error(f"Failed to queue details request: {e}")
         respond({

@@ -305,6 +305,28 @@ class TestWorkerTraceScaffold:
         assert event["job_id"] == "0123456789abcdef0123456789abcdef"
         assert event["origin"] == "slash_command"
 
+    def test_trace_event_omits_query_by_default(self):
+        """Trace log events should be able to omit raw query text by default"""
+        job_data = {
+            "job_id": "0123456789abcdef0123456789abcdef",
+            "origin": "slash_command",
+            "query": "apache log4j",
+            "search_type": "all",
+        }
+
+        trace_include_query = False
+        event = {
+            "event": "worker_trace",
+            "event_type": "job_started",
+            "job_id": job_data.get("job_id", "legacy-no-job-id"),
+            "origin": job_data.get("origin", "unknown-origin"),
+            "search_type": job_data.get("search_type", "all"),
+        }
+        if trace_include_query:
+            event["query"] = job_data.get("query")
+
+        assert "query" not in event
+
 
 class TestLangfuseScaffold:
     """Test Langfuse-related logic without importing worker.py"""
@@ -326,8 +348,8 @@ class TestLangfuseScaffold:
         assert trace_id == trace_id.lower()
         assert "-" not in trace_id
 
-    def test_langfuse_metadata_shape_uses_existing_queue_context(self):
-        """Langfuse metadata should reuse queue context rather than invent new IDs"""
+    def test_langfuse_metadata_shape_uses_non_sensitive_queue_context(self):
+        """Langfuse metadata should avoid raw user IDs while keeping correlation context"""
         job_data = {
             "job_id": "0123456789abcdef0123456789abcdef",
             "origin": "mention",
@@ -337,12 +359,11 @@ class TestLangfuseScaffold:
         metadata = {
             "job_id": job_data.get("job_id", "legacy-no-job-id"),
             "origin": job_data.get("origin", "unknown-origin"),
-            "user_id": job_data.get("user_id"),
         }
 
         assert metadata["job_id"] == "0123456789abcdef0123456789abcdef"
         assert metadata["origin"] == "mention"
-        assert metadata["user_id"] == "U12345"
+        assert "user_id" not in metadata
 
 
 class TestWorkerSearchTypeHandling:

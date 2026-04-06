@@ -201,6 +201,8 @@ Add these values to `.env` before starting or rebuilding the worker:
 
 ```bash
 LANGFUSE_ENABLED=true
+TRACE_LOGS_ENABLED=true
+TRACE_INCLUDE_QUERY=false
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
 LANGFUSE_BASE_URL=http://host.docker.internal:3000
@@ -212,6 +214,9 @@ Notes:
 - Docker Desktop usually supports `host.docker.internal`.
 - On Linux Docker Engine, you may need an `extra_hosts` host-gateway mapping or you can run Langfuse as another Compose service instead.
 - The worker derives a deterministic Langfuse trace ID from the queued `job_id`, so the queue correlation key stays platform-neutral.
+- Raw Slack user IDs are not sent to Langfuse metadata.
+- `TRACE_INCLUDE_QUERY=false` keeps raw query text out of stdout `TRACE` logs unless you explicitly opt in.
+- `TEST_MODE_VERBOSE=false` keeps full formatted reports out of test-mode logs unless you explicitly opt in.
 - When `LANGFUSE_ENABLED=false`, the worker keeps using the local trace scaffold only.
 
 Rebuild and start the worker after changing dependencies or env vars:
