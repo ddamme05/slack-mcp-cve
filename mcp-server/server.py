@@ -23,8 +23,7 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
 # Log token status on startup
 if GITHUB_TOKEN:
-    token_preview = GITHUB_TOKEN[:7] + "..." + GITHUB_TOKEN[-4:] if len(GITHUB_TOKEN) > 11 else "***"
-    print(f"✅ GitHub token loaded: {token_preview}", flush=True)
+    print("✅ GitHub token loaded", flush=True)
     print(f"   Rate limit: 5000 requests/hour", flush=True)
 else:
     print(f"⚠️ No GitHub token - using unauthenticated API (60 requests/hour)", flush=True)
