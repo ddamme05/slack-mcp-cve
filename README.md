@@ -193,6 +193,40 @@ docker logs slack-mcp-worker-1 --tail 50
 docker logs slack-mcp-worker-2 --tail 50
 ```
 
+## Optional Langfuse Tracing
+
+The worker can emit Langfuse traces without changing default app behavior. This is off by default.
+
+Add these values to `.env` before starting or rebuilding the worker:
+
+```bash
+LANGFUSE_ENABLED=true
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=http://host.docker.internal:3000
+LANGFUSE_DISABLE_TELEMETRY=true
+```
+
+Notes:
+
+- Docker Desktop usually supports `host.docker.internal`.
+- On Linux Docker Engine, you may need an `extra_hosts` host-gateway mapping or you can run Langfuse as another Compose service instead.
+- The worker derives a deterministic Langfuse trace ID from the queued `job_id`, so the queue correlation key stays platform-neutral.
+- When `LANGFUSE_ENABLED=false`, the worker keeps using the local trace scaffold only.
+
+Rebuild and start the worker after changing dependencies or env vars:
+
+```bash
+docker compose up -d --build worker
+docker compose logs -f worker
+```
+
+If Langfuse is configured correctly, the worker will log:
+
+```text
+✅ Langfuse tracing enabled
+```
+
 ## Example Output
 
 **CVE Lookup (`CVE-2021-44228`):**
