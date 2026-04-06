@@ -51,6 +51,8 @@ services:
     security_opt:
       - no-new-privileges:true
     mem_limit: 512m
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   slack-bot:
     build: ./slack-bot
