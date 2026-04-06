@@ -306,6 +306,45 @@ class TestWorkerTraceScaffold:
         assert event["origin"] == "slash_command"
 
 
+class TestLangfuseScaffold:
+    """Test Langfuse-related logic without importing worker.py"""
+
+    def test_langfuse_flag_defaults_off(self):
+        """Langfuse should remain opt-in by default"""
+        env_value = None
+        enabled = (env_value or "false").lower() == "true"
+        assert enabled is False
+
+    def test_langfuse_trace_id_can_be_seeded_from_job_id(self):
+        """A job_id can be turned into a deterministic 32-char lowercase hex trace ID"""
+        import hashlib
+
+        job_id = "0123456789abcdef0123456789abcdef"
+        trace_id = hashlib.sha256(job_id.encode("utf-8")).digest()[:16].hex()
+
+        assert len(trace_id) == 32
+        assert trace_id == trace_id.lower()
+        assert "-" not in trace_id
+
+    def test_langfuse_metadata_shape_uses_existing_queue_context(self):
+        """Langfuse metadata should reuse queue context rather than invent new IDs"""
+        job_data = {
+            "job_id": "0123456789abcdef0123456789abcdef",
+            "origin": "mention",
+            "user_id": "U12345",
+        }
+
+        metadata = {
+            "job_id": job_data.get("job_id", "legacy-no-job-id"),
+            "origin": job_data.get("origin", "unknown-origin"),
+            "user_id": job_data.get("user_id"),
+        }
+
+        assert metadata["job_id"] == "0123456789abcdef0123456789abcdef"
+        assert metadata["origin"] == "mention"
+        assert metadata["user_id"] == "U12345"
+
+
 class TestWorkerSearchTypeHandling:
     """Test search_type parameter handling"""
     

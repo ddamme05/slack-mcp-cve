@@ -5,16 +5,23 @@ import re
 import redis
 import httpx
 import asyncio
+from contextlib import nullcontext
 from fastmcp import Client
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from blocks import format_cve_blocks, format_cve_list_blocks, format_error_blocks
 
+try:
+    from langfuse import Langfuse
+except ImportError:
+    Langfuse = None
+
 load_dotenv()
 
 USE_BLOCKS = os.environ.get("USE_BLOCKS", "true").lower() == "true"
 TRACE_LOGS_ENABLED = os.environ.get("TRACE_LOGS_ENABLED", "false").lower() == "true"
+LANGFUSE_ENABLED = os.environ.get("LANGFUSE_ENABLED", "false").lower() == "true"
 slack_client = None
 if os.environ.get("SLACK_BOT_TOKEN"):
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
@@ -24,6 +31,38 @@ if USE_BLOCKS:
     print("✅ Slack Block Kit enabled", flush=True)
 else:
     print("ℹ️ Slack Block Kit disabled (using text formatting)", flush=True)
+
+
+class NoOpObservation:
+    """No-op observation used when Langfuse tracing is disabled."""
+
+    def update(self, **kwargs):
+        return None
+
+    def start_as_current_observation(self, **kwargs):
+        return nullcontext(NoOpObservation())
+
+
+def initialize_langfuse():
+    """Initialize Langfuse only when explicitly enabled and configured."""
+    if not LANGFUSE_ENABLED:
+        return None
+
+    if Langfuse is None:
+        print("⚠️ Langfuse tracing enabled but langfuse package is not installed", flush=True)
+        return None
+
+    if not os.environ.get("LANGFUSE_PUBLIC_KEY") or not os.environ.get("LANGFUSE_SECRET_KEY"):
+        print("⚠️ Langfuse tracing enabled but credentials are missing", flush=True)
+        return None
+
+    try:
+        client = Langfuse()
+        print("✅ Langfuse tracing enabled", flush=True)
+        return client
+    except Exception as e:
+        print(f"⚠️ Langfuse initialization failed: {e}", flush=True)
+        return None
 
 def connect_redis_with_retry(max_retries=5):
     """Connect to Redis with exponential backoff
@@ -62,6 +101,7 @@ def connect_redis_with_retry(max_retries=5):
                 raise
 
 redis_client = connect_redis_with_retry()
+langfuse_client = initialize_langfuse()
 
 async def call_mcp_tool_async(tool_name: str, arguments: dict) -> dict:
     """Call MCP server tool via FastMCP Client with Streamable HTTP"""
@@ -221,6 +261,49 @@ def emit_trace_event(job_data: dict, event_type: str, **fields) -> None:
     }
     event.update(fields)
     print(f"🔎 TRACE {json.dumps(event, sort_keys=True)}", flush=True)
+
+
+def start_job_observation(job_data: dict):
+    """Create a top-level Langfuse observation for a worker job when enabled."""
+    if not langfuse_client:
+        return nullcontext(NoOpObservation())
+
+    return langfuse_client.start_as_current_observation(
+        name="cve-research",
+        as_type="span",
+        trace_context={"trace_id": langfuse_client.create_trace_id(seed=get_job_id(job_data))},
+        input={
+            "query": job_data.get("query"),
+            "search_type": job_data.get("search_type", "all"),
+        },
+        metadata={
+            "job_id": get_job_id(job_data),
+            "origin": get_job_origin(job_data),
+            "user_id": job_data.get("user_id"),
+        },
+    )
+
+
+def call_mcp_tool_with_observation(job_data: dict, parent_observation, tool_name: str, arguments: dict) -> dict:
+    """Call an MCP tool and mirror the result into Langfuse when enabled."""
+    with parent_observation.start_as_current_observation(
+        name=tool_name,
+        as_type="tool",
+        input=arguments,
+        metadata={
+            "job_id": get_job_id(job_data),
+            "origin": get_job_origin(job_data),
+        },
+    ) as tool_observation:
+        result = call_mcp_tool(tool_name, arguments)
+        tool_observation.update(output=summarize_tool_result(tool_name, result))
+
+    emit_trace_event(
+        job_data,
+        "tool_completed",
+        **summarize_tool_result(tool_name, result)
+    )
+    return result
 
 def format_cve_report(nvd_data: dict, github_data: dict, search_type: str = "all") -> str:
     """Format single CVE details for Slack, optionally filtered by search_type"""
@@ -465,68 +548,88 @@ def main():
                 search_type = job_data.get("search_type", "all")
                 emit_trace_event(job_data, "job_started")
 
-                if re.match(r'^CVE-\d{4}-\d{4,}$', query.upper()):
-                    print(f"  → {job_prefix} Detected CVE ID query (type: {search_type})", flush=True)
-                    nvd_data = call_mcp_tool("lookup_cve_details", {"cve_id": query})
-                    emit_trace_event(
-                        job_data,
-                        "tool_completed",
-                        **summarize_tool_result("lookup_cve_details", nvd_data)
-                    )
-                    github_data = call_mcp_tool("search_github_cve_repos", {
-                        "cve_id": query,
-                        "search_type": search_type
-                    })
-                    emit_trace_event(
-                        job_data,
-                        "tool_completed",
-                        **summarize_tool_result("search_github_cve_repos", github_data)
-                    )
-                    print(f"  → {job_prefix} GitHub data received: {json.dumps(github_data, indent=2)}", flush=True)
-
-                    kev_data = None
-                    if nvd_data.get("is_kev") and not nvd_data.get("error"):
-                        kev_data = call_mcp_tool("check_cisa_kev_details", {"cve_id": query})
-                        emit_trace_event(
+                with start_job_observation(job_data) as job_observation:
+                    if re.match(r'^CVE-\d{4}-\d{4,}$', query.upper()):
+                        print(f"  → {job_prefix} Detected CVE ID query (type: {search_type})", flush=True)
+                        nvd_data = call_mcp_tool_with_observation(
                             job_data,
-                            "tool_completed",
-                            **summarize_tool_result("check_cisa_kev_details", kev_data)
+                            job_observation,
+                            "lookup_cve_details",
+                            {"cve_id": query},
                         )
+                        github_data = call_mcp_tool_with_observation(
+                            job_data,
+                            job_observation,
+                            "search_github_cve_repos",
+                            {
+                                "cve_id": query,
+                                "search_type": search_type
+                            },
+                        )
+                        print(f"  → {job_prefix} GitHub data received: {json.dumps(github_data, indent=2)}", flush=True)
 
-                    report = format_cve_report(nvd_data, github_data, search_type)
-                    blocks = format_cve_blocks(nvd_data, github_data, kev_data, search_type) if USE_BLOCKS else None
-                else:
-                    print(f"  → {job_prefix} Detected keyword query", flush=True)
-                    cve_data = call_mcp_tool("search_cve_by_keyword", {"keyword": query})
+                        kev_data = None
+                        if nvd_data.get("is_kev") and not nvd_data.get("error"):
+                            kev_data = call_mcp_tool_with_observation(
+                                job_data,
+                                job_observation,
+                                "check_cisa_kev_details",
+                                {"cve_id": query},
+                            )
+
+                        report = format_cve_report(nvd_data, github_data, search_type)
+                        blocks = format_cve_blocks(nvd_data, github_data, kev_data, search_type) if USE_BLOCKS else None
+                    else:
+                        print(f"  → {job_prefix} Detected keyword query", flush=True)
+                        cve_data = call_mcp_tool_with_observation(
+                            job_data,
+                            job_observation,
+                            "search_cve_by_keyword",
+                            {"keyword": query},
+                        )
+                        report = format_cve_list(cve_data)
+                        blocks = format_cve_list_blocks(cve_data) if USE_BLOCKS else None
+
                     emit_trace_event(
                         job_data,
-                        "tool_completed",
-                        **summarize_tool_result("search_cve_by_keyword", cve_data)
-                    )
-                    report = format_cve_list(cve_data)
-                    blocks = format_cve_list_blocks(cve_data) if USE_BLOCKS else None
-
-                emit_trace_event(
-                    job_data,
-                    "report_built",
-                    has_blocks=bool(blocks),
-                    report_length=len(report),
-                    test_mode=test_mode,
-                )
-
-                if test_mode:
-                    print(f"✅ {job_prefix} Job completed. Report:\n{report}\n", flush=True)
-                    if USE_BLOCKS and blocks:
-                        print(f"📦 {job_prefix} Block count: {len(blocks)} blocks\n", flush=True)
-                    emit_trace_event(
-                        job_data,
-                        "job_completed",
-                        delivered=False,
-                        delivery_method="test_mode",
+                        "report_built",
                         has_blocks=bool(blocks),
+                        report_length=len(report),
+                        test_mode=test_mode,
                     )
-                else:
-                    delivery_result = deliver_response(job_data, report, blocks, job_prefix)
+
+                    if test_mode:
+                        print(f"✅ {job_prefix} Job completed. Report:\n{report}\n", flush=True)
+                        if USE_BLOCKS and blocks:
+                            print(f"📦 {job_prefix} Block count: {len(blocks)} blocks\n", flush=True)
+                        delivery_result = {
+                            "delivered": False,
+                            "delivery_method": "test_mode",
+                            "has_blocks": bool(blocks),
+                        }
+                    else:
+                        with job_observation.start_as_current_observation(
+                            name="deliver_response",
+                            as_type="tool",
+                            input={
+                                "has_response_url": bool(job_data.get("response_url")),
+                                "has_channel_id": bool(job_data.get("channel_id")),
+                            },
+                            metadata={
+                                "job_id": get_job_id(job_data),
+                                "origin": get_job_origin(job_data),
+                            },
+                        ) as delivery_observation:
+                            delivery_result = deliver_response(job_data, report, blocks, job_prefix)
+                            delivery_observation.update(output=delivery_result)
+
+                    job_observation.update(
+                        output={
+                            "report_length": len(report),
+                            "has_blocks": bool(blocks),
+                            **delivery_result,
+                        }
+                    )
                     emit_trace_event(job_data, "job_completed", **delivery_result)
 
         except Exception as e:

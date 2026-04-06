@@ -3,3 +3,4 @@ httpx==0.28.1
 python-dotenv==1.2.1
 fastmcp>=2.13.0.2
 slack-sdk==3.38.0
+langfuse==4.0.6
